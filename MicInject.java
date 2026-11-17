@@ -116,22 +116,39 @@ public class MicInject {
             return;
         }
 
-        // --- Get the injection track and feed a warbling arpeggio ---
-        // A steady tone can be swallowed by a call's echo/noise suppression, so
-        // this cycles A-C#-E (440/554/659 Hz), 0.3 s each — obviously synthetic
-        // and hard for AEC to cancel. On a call, ask the other end what they hear.
+        // --- Get the injection track and feed audio ---
         Object track = call(policy, "createAudioTrackSource", new Class[]{cMix}, mix);
         call(track, "play", new Class[]{});
-        say("INJECTING arpeggio for 90s — start your recording / be on the call NOW");
 
-        double[] freqs = {440.0, 554.37, 659.25};
-        int seg = sr * 3 / 10; // 0.3 s per note
-        short[] one = new short[freqs.length * seg];
-        int idx = 0;
-        for (int n = 0; n < freqs.length; n++) {
-            for (int i = 0; i < seg; i++) {
-                one[idx++] = (short) (Math.sin(2.0 * Math.PI * freqs[n] * i / sr) * 9000);
+        short[] one;
+        if (args.length > 2) {
+            // 3rd arg = path to a 16-bit little-endian PCM mono file at `sr`
+            // (a WAV header, if present, is auto-skipped). Convert a song with:
+            //   ffmpeg -i song.mp3 -ac 1 -ar 16000 -f s16le song.pcm
+            String path = args[2];
+            java.io.File f = new java.io.File(path);
+            byte[] raw = new byte[(int) f.length()];
+            java.io.DataInputStream dis = new java.io.DataInputStream(new java.io.FileInputStream(f));
+            dis.readFully(raw);
+            dis.close();
+            int off = (raw.length > 44 && raw[0] == 'R' && raw[1] == 'I' && raw[2] == 'F' && raw[3] == 'F') ? 44 : 0;
+            int n = (raw.length - off) / 2;
+            one = new short[n];
+            for (int i = 0; i < n; i++) one[i] = (short) ((raw[off + 2 * i] & 0xff) | (raw[off + 2 * i + 1] << 8));
+            say("INJECTING file '" + path + "' (" + n + " samples) on loop for 90s");
+        } else {
+            // Siren sweep 400<->2000 Hz — unmistakable even if the rate is slightly off.
+            int len = sr * 3 / 2; // 1.5 s
+            one = new short[len];
+            double phase = 0.0;
+            for (int i = 0; i < len; i++) {
+                double t = (double) i / len;
+                double tri = (t < 0.5) ? (t * 2.0) : (2.0 - t * 2.0);
+                double f = 400.0 + 1600.0 * tri;
+                phase += 2.0 * Math.PI * f / sr;
+                one[i] = (short) (Math.sin(phase) * 16000);
             }
+            say("INJECTING siren sweep for 90s — be on the call NOW");
         }
 
         Method write = findMethod(track.getClass(), "write", new Class[]{short[].class, int.class, int.class});
