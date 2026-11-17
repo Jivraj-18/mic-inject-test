@@ -47,6 +47,12 @@ public class MicInject {
         int preset = 7;
         if (args.length > 0) { try { preset = Integer.parseInt(args[0].trim()); } catch (Exception e) {} }
         say("target capture preset = " + preset + "  (1=MIC, 6=VOICE_RECOGNITION, 7=VOICE_COMMUNICATION)");
+        // Sample rate of the injection mix. Must match the consumer or the loopback
+        // connects but passes no samples (silence). VOICE_COMMUNICATION is usually
+        // 16 kHz; MIC recorders usually 48 kHz. Override with the 2nd argument.
+        int sr = (preset == 7) ? 16000 : 48000;
+        if (args.length > 1) { try { sr = Integer.parseInt(args[1].trim()); } catch (Exception e) {} }
+        say("sample rate = " + sr + " Hz");
         Class.forName("android.os.Looper").getMethod("prepareMainLooper").invoke(null);
 
         // --- AudioFormat: 48 kHz, PCM 16-bit, mono ---
@@ -54,7 +60,7 @@ public class MicInject {
         int ENC16 = cAudioFormat.getField("ENCODING_PCM_16BIT").getInt(null);
         int CH_MONO = cAudioFormat.getField("CHANNEL_OUT_MONO").getInt(null);
         Object afb = Class.forName("android.media.AudioFormat$Builder").getConstructor().newInstance();
-        afb = call(afb, "setSampleRate", new Class[]{int.class}, 48000);
+        afb = call(afb, "setSampleRate", new Class[]{int.class}, sr);
         afb = call(afb, "setEncoding", new Class[]{int.class}, ENC16);
         afb = call(afb, "setChannelMask", new Class[]{int.class}, CH_MONO);
         Object format = call(afb, "build", new Class[]{});
@@ -118,7 +124,6 @@ public class MicInject {
         call(track, "play", new Class[]{});
         say("INJECTING arpeggio for 90s — start your recording / be on the call NOW");
 
-        int sr = 48000;
         double[] freqs = {440.0, 554.37, 659.25};
         int seg = sr * 3 / 10; // 0.3 s per note
         short[] one = new short[freqs.length * seg];
