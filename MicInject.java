@@ -42,6 +42,11 @@ public class MicInject {
 
     public static void main(String[] args) throws Exception {
         say("start");
+        // Capture preset to target. Default 7 = VOICE_COMMUNICATION (VoIP/WhatsApp calls).
+        // Pass 1 to target MIC (plain voice recorder) instead.
+        int preset = 7;
+        if (args.length > 0) { try { preset = Integer.parseInt(args[0].trim()); } catch (Exception e) {} }
+        say("target capture preset = " + preset + "  (1=MIC, 6=VOICE_RECOGNITION, 7=VOICE_COMMUNICATION)");
         Class.forName("android.os.Looper").getMethod("prepareMainLooper").invoke(null);
 
         // --- AudioFormat: 48 kHz, PCM 16-bit, mono ---
@@ -55,9 +60,9 @@ public class MicInject {
         Object format = call(afb, "build", new Class[]{});
         say("format ok");
 
-        // --- AudioAttributes: capture preset MIC (MediaRecorder.AudioSource.MIC = 1) ---
+        // --- AudioAttributes: the chosen capture preset ---
         Object aab = Class.forName("android.media.AudioAttributes$Builder").getConstructor().newInstance();
-        aab = call(aab, "setCapturePreset", new Class[]{int.class}, 1);
+        aab = call(aab, "setCapturePreset", new Class[]{int.class}, preset);
         Object micAttr = call(aab, "build", new Class[]{});
         say("attrs ok");
 
@@ -105,14 +110,24 @@ public class MicInject {
             return;
         }
 
-        // --- Get the injection track and feed a tone ---
+        // --- Get the injection track and feed a warbling arpeggio ---
+        // A steady tone can be swallowed by a call's echo/noise suppression, so
+        // this cycles A-C#-E (440/554/659 Hz), 0.3 s each — obviously synthetic
+        // and hard for AEC to cancel. On a call, ask the other end what they hear.
         Object track = call(policy, "createAudioTrackSource", new Class[]{cMix}, mix);
         call(track, "play", new Class[]{});
-        say("INJECTING 440 Hz for 90s — open a recorder and hit record NOW");
+        say("INJECTING arpeggio for 90s — start your recording / be on the call NOW");
 
         int sr = 48000;
-        short[] one = new short[sr];
-        for (int i = 0; i < sr; i++) one[i] = (short) (Math.sin(2.0 * Math.PI * 440.0 * i / sr) * 8000);
+        double[] freqs = {440.0, 554.37, 659.25};
+        int seg = sr * 3 / 10; // 0.3 s per note
+        short[] one = new short[freqs.length * seg];
+        int idx = 0;
+        for (int n = 0; n < freqs.length; n++) {
+            for (int i = 0; i < seg; i++) {
+                one[idx++] = (short) (Math.sin(2.0 * Math.PI * freqs[n] * i / sr) * 9000);
+            }
+        }
 
         Method write = findMethod(track.getClass(), "write", new Class[]{short[].class, int.class, int.class});
         write.setAccessible(true);
