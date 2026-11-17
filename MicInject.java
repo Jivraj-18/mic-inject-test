@@ -40,8 +40,43 @@ public class MicInject {
         return -1;
     }
 
+    // Ask the OS what every currently-active recorder is capturing: audio source
+    // (1=MIC, 6=VOICE_RECOGNITION, 7=VOICE_COMMUNICATION, ...) and exact format.
+    // Run this WHILE on a WhatsApp call to read its real capture rate — no guessing.
+    static void probe() throws Exception {
+        Class.forName("android.os.Looper").getMethod("prepareMainLooper").invoke(null);
+        Object binder = Class.forName("android.os.ServiceManager")
+                .getMethod("getService", String.class).invoke(null, "audio");
+        Object svc = Class.forName("android.media.IAudioService$Stub")
+                .getMethod("asInterface", Class.forName("android.os.IBinder")).invoke(null, binder);
+        Method gm = null;
+        for (Method mm : svc.getClass().getMethods())
+            if (mm.getName().equals("getActiveRecordingConfigurations")) { gm = mm; break; }
+        if (gm == null) { say("no getActiveRecordingConfigurations method found"); return; }
+        Object list = (gm.getParameterTypes().length == 0) ? gm.invoke(svc) : gm.invoke(svc, "com.android.shell");
+        java.util.List<?> cfgs = (java.util.List<?>) list;
+        say("active recordings = " + (cfgs == null ? "null" : cfgs.size()));
+        if (cfgs == null) return;
+        int k = 0;
+        for (Object cfg : cfgs) {
+            try {
+                Object src = call(cfg, "getClientAudioSource", new Class[]{});
+                Object cf = call(cfg, "getClientFormat", new Class[]{});
+                Object df = call(cfg, "getFormat", new Class[]{});
+                StringBuilder s = new StringBuilder("[" + (k++) + "] src=" + src);
+                if (cf != null) s.append(" clientRate=").append(call(cf, "getSampleRate", new Class[]{}))
+                        .append(" clientCh=").append(call(cf, "getChannelCount", new Class[]{}));
+                if (df != null) s.append(" devRate=").append(call(df, "getSampleRate", new Class[]{}))
+                        .append(" devCh=").append(call(df, "getChannelCount", new Class[]{}));
+                say(s.toString());
+            } catch (Exception e) { say("cfg read error: " + e); }
+        }
+        if (k == 0) say("no active recorders — make sure the call is connected before running probe");
+    }
+
     public static void main(String[] args) throws Exception {
         say("start");
+        if (args.length > 0 && args[0].equalsIgnoreCase("probe")) { probe(); return; }
         // Capture preset to target. Default 7 = VOICE_COMMUNICATION (VoIP/WhatsApp calls).
         // Pass 1 to target MIC (plain voice recorder) instead.
         int preset = 7;
